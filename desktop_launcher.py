@@ -9,6 +9,8 @@ Installed layout (built by the installers in installer/):
 
 Your documents, index and the AI model live in your own user folder:
     Windows: %LOCALAPPDATA%\\PolicyLookup      Mac: ~/Library/Application Support/PolicyLookup
+If the app is on an external drive, they live next to it in "Policy Lookup Data"
+instead, so nothing is written to the computer's own disk.
 No console window, no setup step: it starts the local AI and the app in the
 background and opens the app in its own window. Use "Quit" in the app to stop.
 """
@@ -32,10 +34,22 @@ if IS_WIN:
     DATA = Path(os.environ.get("LOCALAPPDATA", Path.home() / "AppData" / "Local")) / "PolicyLookup"
     OLLAMA_BIN = ROOT / "ollama" / "ollama.exe"
     PY = ROOT / "python" / "python.exe"
+    # Portable mode: installed on a drive other than the Windows drive (e.g. an
+    # external disk) -> keep documents, index and AI model on that drive too.
+    _sys_drive = os.environ.get("SystemDrive", "C:").upper()
+    if ROOT.drive and ROOT.drive.upper() != _sys_drive:
+        DATA = ROOT / "Policy Lookup Data"
 else:
     DATA = Path.home() / "Library" / "Application Support" / "PolicyLookup"
     OLLAMA_BIN = ROOT / "ollama" / "ollama"
     PY = ROOT / "python" / "bin" / "python3.12"
+    # Portable mode: the .app sits on an external drive (/Volumes/...) -> keep
+    # documents, index and AI model in a folder next to the app on that drive.
+    _bundle = ROOT.parent.parent                     # .../Policy Lookup.app
+    if _bundle.suffix == ".app" and str(_bundle).startswith("/Volumes/"):
+        DATA = _bundle.parent / "Policy Lookup Data"
+if os.environ.get("POLICY_LOOKUP_HOME"):              # explicit override
+    DATA = Path(os.environ["POLICY_LOOKUP_HOME"])
 LOGS = DATA / "logs"
 NO_WINDOW = subprocess.CREATE_NO_WINDOW if IS_WIN else 0
 
