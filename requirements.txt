@@ -1,0 +1,14 @@
+# Runtime dependencies for policy-lookup (Python 3.12).
+# Installed OFFLINE from runtime/wheels-<platform>/ — see README.
+chromadb
+sentence-transformers
+torch
+pymupdf
+pytesseract
+pillow
+python-docx
+levenshtein
+requests
+streamlit
+rapidocr_onnxruntime
+tesserocr        # optional: best OCR (Tesseract 5 bundled); needs macOS 15+ on Mac

@@ -1,0 +1,9 @@
+[browser]
+gatherUsageStats = false
+
+[server]
+headless = true
+# Only this computer can open the app (never the local network).
+address = "127.0.0.1"
+# Large manuals and scanned PDFs (MB).
+maxUploadSize = 1000
