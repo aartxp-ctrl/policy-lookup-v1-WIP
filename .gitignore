@@ -1,0 +1,26 @@
+# Python
+.venv/
+__pycache__/
+*.pyc
+
+# Your documents, index and logs — never commit
+data/
+data_*/
+reference_docs/
+
+# Bundled offline runtimes, models and wheels (several GB) — kept on the drive, not in git
+runtime/
+models/
+
+# OS clutter
+.DS_Store
+._*
+.Spotlight-V100/
+.fseventsd/
+Thumbs.db
+
+# Local editor/agent settings
+.claude/
+
+# Installer build output
+build/
