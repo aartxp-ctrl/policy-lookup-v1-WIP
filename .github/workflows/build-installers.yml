@@ -7,6 +7,11 @@ on:
   push:
     tags: ["v*"]
   workflow_dispatch:
+    inputs:
+      native_mac:
+        description: "Also build the .dmg on a GitHub Mac machine (often unavailable)"
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -38,6 +43,9 @@ jobs:
         with: { files: build/installers/PolicyLookup-Setup-Windows.exe }
 
   mac:
+    # Native .dmg build + smoke test on a real Mac. GitHub's Apple Silicon machines
+    # are frequently unavailable, so this only runs when asked for.
+    if: github.event_name == 'workflow_dispatch' && inputs.native_mac
     runs-on: macos-latest   # Apple Silicon
     steps:
       - uses: actions/checkout@v4
@@ -59,3 +67,25 @@ jobs:
         if: github.ref_type == 'tag'
         uses: softprops/action-gh-release@v2
         with: { files: build/installers/PolicyLookup-Mac.dmg }
+
+  mac-zip:
+    # Builds the Apple Silicon app on Linux (no Mac machine needed).
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - name: Assemble Mac app contents
+        run: python installer/assemble.py --for-mac
+      - name: Icons
+        run: pip install pillow && python installer/make_icons.py build/icons
+      - name: Package Policy Lookup.app (zip)
+        run: |
+          V=1.0.0; if [ "$GITHUB_REF_TYPE" = "tag" ]; then V="${GITHUB_REF_NAME#v}"; fi
+          installer/mac/package_app_zip.sh "$V"
+      - uses: actions/upload-artifact@v4
+        with: { name: PolicyLookup-Mac-zip, path: build/installers/PolicyLookup-Mac.zip }
+      - name: Attach to release
+        if: github.ref_type == 'tag'
+        uses: softprops/action-gh-release@v2
+        with: { files: build/installers/PolicyLookup-Mac.zip }

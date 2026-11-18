@@ -28,7 +28,17 @@ HF = "https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2/resolve/main
 APP_FILES = ["app.py", "answer.py", "config.py", "explain.py", "glossary.py", "ingest.py", "library.py",
              "search.py", "desktop_launcher.py", "ingest_cli.py", "README.md"]
 
-if IS_WIN:
+# `--for-mac`: assemble the Apple Silicon app on a Linux/Windows build machine
+# (used when no GitHub Mac machine is available). Packages are installed for
+# macOS with pip's --platform/--target instead of by the Mac Python itself.
+CROSS_MAC = "--for-mac" in sys.argv
+if CROSS_MAC:
+    IS_WIN = False
+
+if CROSS_MAC:
+    PY_ASSET, OLLAMA_ASSET, LOCK = ("cpython-3.12.16%2B20261110-aarch64-apple-darwin-install_only.tar.gz",
+                                    "ollama-darwin.tgz", "lock-macos-arm64.txt")
+elif IS_WIN:
     PY_ASSET, OLLAMA_ASSET, LOCK = ("cpython-3.12.16%2B20261110-x86_64-pc-windows-msvc-install_only.tar.gz",
                                     "ollama-windows-amd64.zip", "lock-windows-amd64.txt")
 else:
@@ -53,10 +63,18 @@ def main() -> None:
     with tarfile.open(fetch(PBS + PY_ASSET, DL / "python.tar.gz")) as t:
         t.extractall(OUT)
     py = OUT / "python" / ("python.exe" if IS_WIN else "bin/python3.12")
-    subprocess.run([str(py), "-m", "pip", "install", "--no-warn-script-location", "--only-binary=:all:",
-                    "-r", str(REPO / "requirements" / LOCK)], check=True)
-    r = subprocess.run([str(py), "-m", "pip", "install", "--no-warn-script-location", "--only-binary=:all:",
-                        "tesserocr==2.13.0"])
+    if CROSS_MAC:
+        site = OUT / "python" / "lib" / "python3.12" / "site-packages"
+        mac = ["--platform", "macosx_15_0_arm64", "--python-version", "3.12", "--implementation", "cp",
+               "--only-binary=:all:", "--no-deps", "--target", str(site), "--upgrade"]
+        subprocess.run([sys.executable, "-m", "pip", "install", *mac, "-r", str(REPO / "requirements" / LOCK)],
+                       check=True)
+        r = subprocess.run([sys.executable, "-m", "pip", "install", *mac, "tesserocr==2.13.0"])
+    else:
+        subprocess.run([str(py), "-m", "pip", "install", "--no-warn-script-location", "--only-binary=:all:",
+                        "-r", str(REPO / "requirements" / LOCK)], check=True)
+        r = subprocess.run([str(py), "-m", "pip", "install", "--no-warn-script-location", "--only-binary=:all:",
+                            "tesserocr==2.13.0"])
     if r.returncode != 0 and not IS_WIN:
         # Building on an older macOS than the tesserocr wheel targets: bundle the
         # macOS 15 build anyway. It is used on Macs with macOS 15+; on older Macs
@@ -95,7 +113,8 @@ def main() -> None:
     fetch("https://github.com/tesseract-ocr/tessdata/raw/main/eng.traineddata",
           app / "models" / "tessdata" / "eng.traineddata")
     # pre-compile so the installed app starts faster and never writes into its own folder
-    subprocess.run([str(py), "-m", "compileall", "-q", str(OUT / "app"), str(OUT / "python")])
+    if not CROSS_MAC:
+        subprocess.run([str(py), "-m", "compileall", "-q", str(OUT / "app"), str(OUT / "python")])
     print("assembled", OUT)
 
 
