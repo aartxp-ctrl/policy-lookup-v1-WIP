@@ -57,7 +57,15 @@ def main() -> None:
                     "-r", str(REPO / "requirements" / LOCK)], check=True)
     r = subprocess.run([str(py), "-m", "pip", "install", "--no-warn-script-location", "--only-binary=:all:",
                         "tesserocr==2.13.0"])
-    print("tesserocr:", "installed" if r.returncode == 0 else "not available (fallback OCR will be used)")
+    if r.returncode != 0 and not IS_WIN:
+        # Building on an older macOS than the tesserocr wheel targets: bundle the
+        # macOS 15 build anyway. It is used on Macs with macOS 15+; on older Macs
+        # the app falls back to the basic OCR automatically.
+        site = subprocess.run([str(py), "-c", "import sysconfig; print(sysconfig.get_paths()['purelib'])"],
+                              capture_output=True, text=True, check=True).stdout.strip()
+        r = subprocess.run([str(py), "-m", "pip", "install", "--no-deps", "--only-binary=:all:", "--upgrade",
+                            "--platform", "macosx_15_0_arm64", "--target", site, "tesserocr==2.13.0"])
+    print("tesserocr:", "bundled" if r.returncode == 0 else "not available (fallback OCR will be used)")
 
     # 2. local AI server (CPU build: GPU libraries left out to keep the download small)
     arc = fetch(OLLAMA + OLLAMA_ASSET, DL / OLLAMA_ASSET)
