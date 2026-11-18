@@ -10,9 +10,9 @@ Download the installer for your computer from the **Releases** page
 3. Click **Next → Install → Finish**.
 4. Policy Lookup opens. Next time, open it from the **Start menu** or the **desktop icon**.
 
-## Mac (Apple Silicon)
+## Mac (Apple Silicon — M1 or newer)
 
-1. Download **`PolicyLookup-Mac.dmg`** and open it.
+1. Download **`PolicyLookup-Mac.zip`** and double-click it to unzip.
 2. Drag **Policy Lookup** into **Applications**.
 3. Open **Policy Lookup** from Applications.
    The first time, macOS may say it can't verify the app: click **Done**, then open
