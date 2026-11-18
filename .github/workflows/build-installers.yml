@@ -38,7 +38,8 @@ jobs:
         with: { files: build/installers/PolicyLookup-Setup-Windows.exe }
 
   mac:
-    runs-on: macos-15
+    # macos-14 (Apple Silicon): macos-15 machines were often unavailable on GitHub
+    runs-on: macos-14
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
