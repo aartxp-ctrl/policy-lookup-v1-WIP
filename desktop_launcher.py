@@ -51,6 +51,7 @@ else:
 if os.environ.get("POLICY_LOOKUP_HOME"):              # explicit override
     DATA = Path(os.environ["POLICY_LOOKUP_HOME"])
 LOGS = DATA / "logs"
+DISK_IMAGE = None                                    # set when data lives in a disk image
 NO_WINDOW = subprocess.CREATE_NO_WINDOW if IS_WIN else 0
 
 
@@ -81,6 +82,55 @@ def open_window() -> None:
     webbrowser.open(URL)
 
 
+def _fs_type(path: Path) -> str:
+    """Filesystem type of the volume holding `path` (macOS), e.g. 'apfs', 'exfat'."""
+    try:
+        out = subprocess.run(["/sbin/mount"], capture_output=True, text=True, timeout=10).stdout
+    except Exception:
+        return ""
+    best, kind = "", ""
+    for line in out.splitlines():           # "/dev/disk4s1 on /Volumes/X (exfat, local, ...)"
+        if " on " not in line or " (" not in line:
+            continue
+        mnt = line.split(" on ", 1)[1].rsplit(" (", 1)[0]
+        if (str(path) + "/").startswith(mnt.rstrip("/") + "/") and len(mnt) > len(best):
+            best, kind = mnt, line.rsplit(" (", 1)[1].split(",")[0].strip()
+    return kind.lower()
+
+
+def use_disk_image_if_needed() -> None:
+    """Mac external drives are often exFAT/FAT, where the search index's database
+    (SQLite) fails with 'attempt to write a readonly database'. In that case keep
+    the data inside a growable Mac disk image stored ON THE SAME DRIVE, mounted
+    privately (hidden from Finder) while the app runs. Nothing goes on the Mac's disk."""
+    global DATA, DISK_IMAGE
+    if IS_WIN or _fs_type(DATA) not in ("exfat", "msdos", "ntfs", "fusefs", "smbfs"):
+        return
+    DATA.mkdir(parents=True, exist_ok=True)
+    img = DATA / "PolicyLookupData.sparsebundle"
+    mnt = Path("/tmp") / f"PolicyLookupData-{os.getuid()}"
+    if not os.path.ismount(mnt):
+        if not img.exists():
+            subprocess.run(["hdiutil", "create", "-size", "500g", "-type", "SPARSEBUNDLE",
+                            "-fs", "APFS", "-volname", "PolicyLookupData", str(img)],
+                           check=True, capture_output=True, timeout=300)
+        mnt.mkdir(parents=True, exist_ok=True)
+        subprocess.run(["hdiutil", "attach", "-nobrowse", "-noautoopen", "-owners", "on",
+                        "-mountpoint", str(mnt), str(img)],
+                       check=True, capture_output=True, timeout=300)
+    DISK_IMAGE = mnt
+    DATA = mnt
+
+
+def detach_disk_image() -> None:
+    if DISK_IMAGE and os.path.ismount(DISK_IMAGE):
+        for _ in range(5):
+            if subprocess.run(["hdiutil", "detach", str(DISK_IMAGE)], capture_output=True).returncode == 0:
+                return
+            time.sleep(1)
+        subprocess.run(["hdiutil", "detach", "-force", str(DISK_IMAGE)], capture_output=True)
+
+
 def env() -> dict:
     home = DATA / "home"
     for d in (DATA, LOGS, home, DATA / "tmp"):
@@ -92,6 +142,7 @@ def env() -> dict:
         "POLICY_LOOKUP_OLLAMA_URL": f"http://127.0.0.1:{OLLAMA_PORT}",
         "OLLAMA_HOST": f"127.0.0.1:{OLLAMA_PORT}",
         "OLLAMA_MODELS": str(DATA / "ollama-models"),
+        "OLLAMA_NO_CLOUD": "1",          # no ollama.com cloud features / model recommendations
         "HOME": str(home), "XDG_CACHE_HOME": str(home / ".cache"), "HF_HOME": str(home / ".cache" / "hf"),
         "HF_HUB_OFFLINE": "1", "TRANSFORMERS_OFFLINE": "1", "ANONYMIZED_TELEMETRY": "False",
         "TMPDIR": str(DATA / "tmp"), "TEMP": str(DATA / "tmp"), "TMP": str(DATA / "tmp"),
@@ -107,8 +158,13 @@ def main() -> None:
     if up(URL):                      # already running: just bring up a window
         open_window()
         return
-    e = env()
+    LOGS.mkdir(parents=True, exist_ok=True)       # logs stay in the visible data folder
     log = open(LOGS / "app.log", "a", encoding="utf-8")
+    try:
+        use_disk_image_if_needed()
+    except Exception as exc:
+        log.write(f"Could not set up the data disk image: {exc!r}\n"); log.flush()
+    e = env()
     ollama = None
     if OLLAMA_BIN.exists() and not up(f"http://127.0.0.1:{OLLAMA_PORT}/api/tags"):
         ollama = subprocess.Popen([str(OLLAMA_BIN), "serve"], env=e, stdout=log, stderr=log,
@@ -131,6 +187,11 @@ def main() -> None:
     finally:
         if ollama and ollama.poll() is None:
             ollama.terminate()
+            try:
+                ollama.wait(timeout=10)
+            except Exception:
+                ollama.kill()
+        detach_disk_image()
 
 
 if __name__ == "__main__":
