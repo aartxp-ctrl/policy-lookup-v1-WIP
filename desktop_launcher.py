@@ -104,7 +104,12 @@ def use_disk_image_if_needed() -> None:
     the data inside a growable Mac disk image stored ON THE SAME DRIVE, mounted
     privately (hidden from Finder) while the app runs. Nothing goes on the Mac's disk."""
     global DATA, DISK_IMAGE
-    if IS_WIN or _fs_type(DATA) not in ("exfat", "msdos", "ntfs", "fusefs", "smbfs"):
+    if IS_WIN:
+        return
+    fs = _fs_type(DATA)
+    print(f"[launcher] data folder {DATA} is on filesystem {fs or 'unknown'}", flush=True)
+    # Any external drive (/Volumes/...) unless it is a Mac-format disk: use the image.
+    if fs in ("apfs", "hfs") or not str(DATA).startswith("/Volumes/"):
         return
     DATA.mkdir(parents=True, exist_ok=True)
     img = DATA / "PolicyLookupData.sparsebundle"
@@ -120,6 +125,7 @@ def use_disk_image_if_needed() -> None:
                        check=True, capture_output=True, timeout=300)
     DISK_IMAGE = mnt
     DATA = mnt
+    print(f"[launcher] using data disk image {img} mounted at {mnt}", flush=True)
 
 
 def detach_disk_image() -> None:
@@ -160,6 +166,7 @@ def main() -> None:
         return
     LOGS.mkdir(parents=True, exist_ok=True)       # logs stay in the visible data folder
     log = open(LOGS / "app.log", "a", encoding="utf-8")
+    sys.stdout = log
     try:
         use_disk_image_if_needed()
     except Exception as exc:
