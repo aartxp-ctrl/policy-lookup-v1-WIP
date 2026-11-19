@@ -25,6 +25,7 @@ definition found.
 """
 
 import json
+import re
 
 import config
 
@@ -113,6 +114,8 @@ def _extract_tabular(lines: list[str]) -> dict[str, str]:
                         break  # two consecutive blank lines ends a multi-line full form
                     k += 1
                 full_term = " ".join(full_parts).strip()
+                # drop page markers that leaked into the cell, e.g. "Principal IFA (viii) (13)"
+                full_term = re.sub(r"(\s*\((?:[ivxlcdm]+|\d{1,3})\))+\s*$", "", full_term, flags=re.IGNORECASE).strip()
                 if full_term and len(full_term) <= 200:
                     found.setdefault(abbr, full_term)
                 i = k
@@ -149,11 +152,66 @@ def _extract_inline(lines: list[str]) -> dict[str, str]:
     return found
 
 
+_PAREN_ABBR_RE = re.compile(r"\(([A-Z][A-Za-z0-9&/\-]{1,11})\)")
+_JOIN_WORDS = {"of", "and", "for", "the", "in", "on", "to", "by", "&", "at", "a", "an"}
+
+
+def _match_initials(words: list[str], abbr: str) -> list[str] | None:
+    """Returns the trailing words of `words` whose initials spell `abbr`
+    (e.g. ["Competent", "Financial", "Authority"] for "CFA", or
+    ["Acceptance", "of", "Necessity"] for "AoN"), else None. Small joining
+    words ("of", "and", ...) may be skipped; any other word that doesn't
+    fit means it is not a definition."""
+    letters = [c for c in abbr if c.isalpha()]
+    if len(letters) < 2:
+        return None
+    i, j = len(words) - 1, len(letters) - 1
+    while i >= 0 and j >= 0:
+        w = words[i].strip("\"'‘’“”,;:")
+        if w and w[0].lower() == letters[j].lower():
+            j -= 1
+        elif w.lower() not in _JOIN_WORDS:
+            return None
+        i -= 1
+    if j >= 0:
+        return None
+    phrase = words[i + 1:]
+    while phrase and phrase[0].lower() in _JOIN_WORDS:
+        phrase = phrase[1:]
+    return phrase or None
+
+
+def _extract_parenthetical(text: str) -> dict[str, str]:
+    """Method 3, over the whole document: definitions written in running
+    text as "Full Form (ABBR)", e.g. "Competent Financial Authority (CFA)".
+    Only accepted when the words right before the brackets really spell the
+    abbreviation, so ordinary bracketed text is never picked up. Lets
+    documents with no abbreviations table still answer "what is X"."""
+    found: dict[str, str] = {}
+    flat = " ".join(text.split())
+    for m in _PAREN_ABBR_RE.finditer(flat):
+        abbr = m.group(1)
+        plural = len(abbr) >= 3 and abbr.endswith("s") and abbr[:-1].isupper()
+        if plural:
+            abbr = abbr[:-1]                       # "IFAs" -> "IFA"
+        if not _looks_like_abbreviation_token(abbr) and not (abbr.isupper() and len(abbr) >= 2):
+            continue
+        before = flat[max(0, m.start() - 160):m.start()].split()[-14:]
+        phrase = _match_initials(before, abbr)
+        if phrase:
+            if plural and len(phrase[-1]) > 3 and phrase[-1].endswith("s"):
+                phrase = phrase[:-1] + [phrase[-1][:-1]]   # "Advisors" -> "Advisor"
+            full = " ".join(phrase).strip(" ,;:-\"'‘’“”")
+            found.setdefault(abbr, full)
+    return found
+
+
 def extract_glossary_from_text(text: str) -> dict[str, str]:
-    """Runs both extraction methods over one document's raw text, within
-    every identified glossary-like section, and returns a merged
-    {abbreviation: full_term} dict. Returns {} (silently) if the document
-    has no such section."""
+    """Runs the extraction methods over one document's raw text: the table
+    and inline methods within every identified abbreviations/glossary
+    section, then "Full Form (ABBR)" definitions anywhere in the text.
+    Section entries win over running-text ones. Returns a merged
+    {abbreviation: full_term} dict ({} if nothing is found)."""
     lines = text.splitlines()
     sections = _find_glossary_sections(lines)
     entries: dict[str, str] = {}
@@ -162,6 +220,8 @@ def extract_glossary_from_text(text: str) -> dict[str, str]:
             entries.setdefault(abbr, full_term)
         for abbr, full_term in _extract_inline(section_lines).items():
             entries.setdefault(abbr, full_term)
+    for abbr, full_term in _extract_parenthetical(text).items():
+        entries.setdefault(abbr, full_term)
     return entries
 
 
@@ -181,6 +241,20 @@ def _save_json(path, data) -> None:
 
 def load_glossary() -> dict[str, str]:
     return _load_json(config.GLOSSARY_PATH, {})
+
+
+def lookup(term: str) -> dict | None:
+    """Case-insensitive lookup of one abbreviation in the merged glossary.
+    Returns {"abbr", "full", "source"} or None."""
+    if not term:
+        return None
+    glossary = load_glossary()
+    key = term if term in glossary else next(
+        (k for k in glossary if k.lower() == term.lower()), None)
+    if key is None:
+        return None
+    sources = _load_json(config.GLOSSARY_SOURCES_PATH, {})
+    return {"abbr": key, "full": glossary[key], "source": sources.get(key, "")}
 
 
 def get_conflicts() -> dict[str, list[dict]]:

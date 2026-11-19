@@ -663,6 +663,33 @@ def retrieve(query: str, mode: str = "lookup", file_filter: list[str] | None = N
     return results[:cap] if cap else results
 
 
+_DEFINITION_QUESTION_RE = re.compile(
+    r"\b(what\s+(is|are|does|do)|what's|define|definition|meaning|mean|means|stand|stands|"
+    r"full\s*form|expand|expansion|abbreviation|acronym|kya\s+hai|ka\s+matlab|matlab)\b",
+    re.IGNORECASE)
+_QUESTION_FILLER = {"what", "is", "are", "does", "do", "the", "a", "an", "of", "for", "stand", "stands",
+                    "mean", "means", "meaning", "define", "definition", "full", "form", "expand",
+                    "expansion", "abbreviation", "acronym", "kya", "hai", "ka", "matlab", "in", "this",
+                    "document", "manual", "policy", "please", "tell", "me", "whats", "what's"}
+
+
+def find_abbreviation(raw_query: str) -> dict | None:
+    """Rule-based (no AI needed) check for "what is X" / "full form of X" /
+    "X meaning" questions, or a query that is just an abbreviation. Returns
+    the glossary entry for X, or None. This is what makes "what is FAA"
+    work even when the local AI model isn't installed."""
+    tokens = re.findall(r"[A-Za-z][A-Za-z0-9&/\-]*", raw_query)
+    content = [t for t in tokens if t.lower() not in _QUESTION_FILLER]
+    is_definition_question = bool(_DEFINITION_QUESTION_RE.search(raw_query)) or len(content) == 1
+    if not is_definition_question or len(content) != 1:
+        return None          # e.g. "who approves LTE" is not asking what LTE stands for
+    for tok in content:
+        entry = glossary.lookup(tok)
+        if entry:
+            return entry
+    return None
+
+
 def search(raw_query: str, file_filter: list[str] | None = None) -> dict:
     """Top-level entry point used by the UI: classifies intent, retrieves,
     logs the query to the audit trail, and returns everything the UI needs
@@ -670,6 +697,18 @@ def search(raw_query: str, file_filter: list[str] | None = None) -> dict:
     classification = classify_query(raw_query)
     mode = classification["mode"]
     cleaned_query = classification["cleaned_query"]
+
+    # Abbreviation questions are answered from the documents' own
+    # abbreviations, with or without the AI classifier.
+    glossary_answer = glossary.lookup(classification["entity"]) if classification["entity"] else None
+    if glossary_answer is None:
+        glossary_answer = find_abbreviation(raw_query)
+        if glossary_answer:
+            classification["entity"] = glossary_answer["abbr"]
+            if mode == "lookup":
+                mode = "definition"
+    if glossary_answer and glossary_answer["abbr"] not in cleaned_query:
+        cleaned_query = f"{cleaned_query} {glossary_answer['abbr']}"
 
     results = retrieve(cleaned_query, mode=mode, file_filter=file_filter, entity=classification["entity"])
 
@@ -698,4 +737,5 @@ def search(raw_query: str, file_filter: list[str] | None = None) -> dict:
         "fallback_used": classification["fallback_used"],
         "results": results,
         "low_confidence": low_confidence,
+        "glossary_answer": glossary_answer,
     }

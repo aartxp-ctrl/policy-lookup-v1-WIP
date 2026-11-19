@@ -269,9 +269,10 @@ if result:
 
     # --- abbreviation box ---
     entity = result.get("entity")
-    glossary_map = glossary.load_glossary()
-    if entity and entity in glossary_map:
-        st.success(f"**{entity}** = {glossary_map[entity]}")
+    g_ans = result.get("glossary_answer")
+    if g_ans:
+        src = f" — from {g_ans['source']}" if g_ans.get("source") else ""
+        st.success(f"**{g_ans['abbr']}** = {g_ans['full']}{src}")
 
     # --- glossary bridge notice ---
     _, bridge_matches = search.glossary_bridge_expand(cleaned)
@@ -284,13 +285,17 @@ if result:
     results = result["results"]
     if not results:
         st.warning("No results found. Try rephrasing your question, or check the spelling of any abbreviation.")
-    elif result.get("low_confidence"):
-        st.warning("No clause closely matches this question — these are only the nearest matches. "
-                   "The answer may not be in these documents; check carefully before relying on them.")
     else:
-        # --- short answer first, exact text right under it ---
-        st.warning("⚠️ **Offline AI tool — it can be wrong.** Use the short answer to orient yourself, "
-                   "then read the exact text from the document before you sign or act on it.")
+        if result.get("low_confidence") and g_ans:
+            st.info(f"The full form of {g_ans['abbr']} is shown above, from the document's own abbreviations. "
+                    "No clause explains it further; these are the nearest places it is mentioned.")
+        elif result.get("low_confidence"):
+            st.warning("No clause closely matches this question — these are only the nearest matches. "
+                       "The answer may not be in these documents; check carefully before relying on them.")
+        else:
+            # --- short answer first, exact text right under it ---
+            st.warning("⚠️ **Offline AI tool — it can be wrong.** Use the short answer to orient yourself, "
+                       "then read the exact text from the document before you sign or act on it.")
         ans_key = f"answer::{raw_query}::{mode}::{st.session_state.file_filter}"
         if ans_key not in st.session_state:
             with st.spinner("Finding the short answer (on this computer, offline)..."):

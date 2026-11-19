@@ -27,7 +27,8 @@ except Exception as e:
     print("network lock OK:", type(e).__name__)
 
 text_page = ("Section 2: Annual Leave\nEmployees are entitled to 24 days of paid annual leave per year.\n"
-             "A maximum of 10 unused days may be carried forward to the next year.")
+             "A maximum of 10 unused days may be carried forward to the next year.\n"
+             "Travel claims are cleared by the Federal Aviation Administration (FAA).")
 scan_text = "Section 3: Sick Leave\nA medical certificate is required for sick leave longer than 3 days."
 doc = pymupdf.open()
 doc.new_page().insert_textbox(pymupdf.Rect(60, 60, 540, 400), text_page, fontsize=11)
@@ -57,4 +58,9 @@ for q, want in checks.items():
     sentence, src = answer.key_sentence(q, out["results"])
     print(f"{q} -> {sentence!r} [{src.citation if src else None}]")
     assert sentence and want in sentence, f"FAIL: expected {want!r}"
+# abbreviation questions must work without the local AI model
+out = search.search("What is FAA?")
+ga = out.get("glossary_answer")
+print("What is FAA? ->", ga)
+assert ga and ga["full"] == "Federal Aviation Administration", "FAIL: abbreviation not answered"
 print("SMOKE TEST PASSED")
